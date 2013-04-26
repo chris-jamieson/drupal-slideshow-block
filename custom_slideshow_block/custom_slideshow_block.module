@@ -1,0 +1,244 @@
+<?php
+
+/**
+ * Implements hook_block_info().
+ */
+function custom_slideshow_block_block_info()
+{
+    $blocks                           = array();
+    $blocks['custom_slideshow_block'] = array(
+        'info' => t('Custom Slideshow Block')
+    );
+    
+    return $blocks;
+}
+
+/**
+ * Implements hook_block_configure().
+ */
+function custom_slideshow_block_block_configure($delta = '')
+{
+    $form = array();
+    
+    switch ($delta) {
+        case 'custom_slideshow_block':
+            // allow users to choose number of slides
+            $form['slides_number'] = array(
+                '#type' => 'textfield',
+                '#title' => t('How many slides do you need? (you can disable slides without changing this number)'),
+                '#default_value' => variable_get('slides_number', 3)
+            );
+            
+            $slides_number = variable_get('slides_number', 3);
+            
+            for ($i = 1; $i <= $slides_number; $i++) {
+                if ($i == 1) {
+                    $collapsed = FALSE;
+                } else {
+                    $collapsed = TRUE;
+                }
+                //fieldset
+                $form['slide_' . $i]                                 = array(
+                    '#type' => 'fieldset',
+                    '#title' => t('Slide ' . $i),
+                    '#weight' => $i,
+                    '#collapsible' => TRUE,
+                    '#collapsed' => $collapsed
+                );
+                // caption text
+                $form['slide_' . $i]['slide_' . $i . '_caption']     = array(
+                    '#type' => 'text_format',
+                    '#title' => t('Caption'),
+                    '#default_value' => variable_get('slide_' . $i . '_caption', NULL),
+                    '#description' => t('Enter slide caption text if desired')
+                );
+                // destination (url)
+                $form['slide_' . $i]['slide_' . $i . '_destination'] = array(
+                    '#type' => 'textfield',
+                    '#title' => t('Destination'),
+                    '#default_value' => variable_get('slide_' . $i . '_destination', NULL),
+                    '#element_validate' => array(
+                        '_custom_slideshow_block_validate_destination'
+                    ),
+                    '#description' => t('Enter link destination for slide (e.g. http://superkind.co.uk/about)')
+                );
+                
+                // File selection form element
+                $form['slide_' . $i]['slide_' . $i . '_image']   = array(
+                    '#name' => 'slide_' . $i . '_image',
+                    '#type' => 'managed_file',
+                    '#title' => t('Image'),
+                    '#description' => t('Select an Image for the custom block.  Only *.gif, *.png, *.jpg, and *.jpeg images allowed. Minimum image size: 1200px x 400px'),
+                    '#default_value' => variable_get('slide_' . $i . '_image', NULL),
+                    '#upload_location' => 'public://custom_slideshow_block_image/',
+                    '#upload_validators' => array(
+                        'file_validate_extensions' => array(
+                            'gif png jpg jpeg'
+                        ),
+			'file_validate_image_resolution' => array(
+				'0',
+				'1200x400'
+			)
+                    )
+                );
+                // slide enabled?
+                $form['slide_' . $i]['slide_' . $i . '_enabled'] = array(
+                    '#type' => 'checkbox',
+                    '#title' => t('Display slide in block'),
+                    '#default_value' => variable_get('slide_' . $i . '_enabled', FALSE)
+                );
+            }
+            break;
+    }
+    return $form;
+}
+
+/**
+ * Validates destination of slide links
+ */
+function _custom_slideshow_block_validate_destination($element, &$form_state)
+{
+    $item              = array();
+    $item['link_path'] = $element['#value'];
+    // drupal_set_message('<pre>' . print_r($element, TRUE) . '</pre>');
+    // use link validation taken from http://api.drupal.org/api/drupal/modules%21menu%21menu.admin.inc/function/menu_edit_item_validate/7
+    
+    if (!url_is_external($item['link_path'])) {
+        $parsed_link = parse_url($item['link_path']);
+        if (isset($parsed_link['query'])) {
+            $item['options']['query'] = drupal_get_query_array($parsed_link['query']);
+        } else {
+            // Use unset() rather than setting to empty string
+            // to avoid redundant serialized data being stored.
+            unset($item['options']['query']);
+        }
+        if (isset($parsed_link['fragment'])) {
+            $item['options']['fragment'] = $parsed_link['fragment'];
+        } else {
+            unset($item['options']['fragment']);
+        }
+        if ($item['link_path'] != $parsed_link['path']) {
+            $item['link_path'] = $parsed_link['path'];
+        }
+    }
+    if (!trim($item['link_path']) || !drupal_valid_path($item['link_path'], TRUE)) {
+        form_set_error($element['#name'], t("The path '@link_path' is either invalid or you do not have access to it.", array(
+            '@link_path' => $item['link_path']
+        )));
+    }
+}
+
+
+/**
+ * Implements hook_block_save().
+ */
+function custom_slideshow_block_block_save($delta = '', $edit = array())
+{
+    switch ($delta) {
+        case 'custom_slideshow_block':
+            // save the slide number
+            variable_set('slides_number', $edit['slides_number']);
+            $slides_number = variable_get('slides_number', 3);
+            
+            for ($i = 1; $i <= $slides_number; $i++) {
+                // Saving the caption 
+                if (!empty($edit['slide_' . $i . '_caption']['value'])) {
+                    variable_set('slide_' . $i . '_caption', $edit['slide_' . $i . '_caption']['value']);
+                }
+                // Saving the destination 
+                if (!empty($edit['slide_' . $i . '_destination'])) {
+                    variable_set('slide_' . $i . '_destination', $edit['slide_' . $i . '_destination']);
+                }
+                // Saving whether slide enabled
+                if (!empty($edit['slide_' . $i . '_enabled'])) {
+                    variable_set('slide_' . $i . '_enabled', $edit['slide_' . $i . '_enabled']);
+                }
+                // Saving the file, setting it to a permanent state, setting a FID variable
+                if (!empty($edit['slide_' . $i . '_image'])) {
+                    $file         = file_load($edit['slide_' . $i . '_image']);
+                    $file->status = FILE_STATUS_PERMANENT;
+                    file_save($file);
+                    $block = block_load('custom_slideshow_block', $delta);
+                    file_usage_add($file, 'custom_slideshow_block', 'block', $block->bid);
+                    variable_set('slide_' . $i . '_image', $file->fid);
+                }
+            }
+            
+            break;
+    }
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function custom_slideshow_block_block_view($delta = '')
+{
+    $block = array();
+    
+    switch ($delta) {
+        case 'custom_slideshow_block':
+            $block['content'] = construct_slideshow_block();
+            break;
+    }
+    
+    return $block;
+}
+
+/**
+ * Custom function to assemble renderable array for block content.
+ * Returns a renderable array with the block content.
+ * @return
+ *   returns a renderable array of block content.
+ */
+function construct_slideshow_block()
+{
+    $block = array();
+    
+    // figure out how many slides there are
+    $slides_number = variable_get('slides_number', 3);
+    
+    for ($i = 1; $i <= $slides_number; $i++) {
+        $slide_enabled = variable_get('slide_' . $i . '_enabled', NULL);
+        if ($slide_enabled == TRUE) {
+            // image
+            $image_file = file_load(variable_get('slide_' . $i . '_image', NULL));
+            $image_path = '';
+            
+            if (isset($image_file->uri)) {
+                $image_path = $image_file->uri;
+            }
+            
+		$image_url = image_style_url('wide_slide', $image_path);
+
+            $image = theme_image(array(
+                'path' => ($image_url),
+                'alt' => t(''),
+                'title' => t(''),
+                'attributes' => array(
+                    'class' => 'class_name'
+                )
+            ));
+            
+            $destination = variable_get('slide_' . $i . '_destination', NULL);
+            $caption     = variable_get('slide_' . $i . '_caption', NULL);
+            
+            $slide = '
+<a class="slide" href="' . $destination . '">
+' . $image . '
+<div class="caption">' . $caption . '</div>
+</a>
+';
+            
+            
+            $block['slide_' . $i] = array(
+                '#prefix' => '<div class="slide slide-' . $i . '">',
+                '#type' => 'markup',
+                '#markup' => $slide,
+                '#suffix' => '</div>'
+            );
+        }
+    }
+    
+    
+    return $block;
+}

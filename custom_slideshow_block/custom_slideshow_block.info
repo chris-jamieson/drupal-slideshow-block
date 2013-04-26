@@ -1,0 +1,5 @@
+name = "Custom slideshow block"
+description = Allows users to add a custom slideshow for display in a block
+core = 7.x
+
+dependencies[] = block
